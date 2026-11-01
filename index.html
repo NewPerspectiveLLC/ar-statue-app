@@ -5,92 +5,66 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#14161a">
+<link rel="icon" href="data:,">
 <title>AR Statue App</title>
-<script type="module" src="model-viewer.min.js"></script>
-<style>
-  :root{--bg:#14161a;--fg:#f2efe8;--accent:#d9b56b}
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  body{display:flex;flex-direction:column;min-height:100dvh}
-  header{padding:calc(env(safe-area-inset-top) + 18px) 20px 6px;text-align:center}
-  h1{margin:0;font-size:26px;letter-spacing:.06em;font-weight:700}
-  .sub{margin:6px 0 0;font-size:14px;opacity:.7}
-  model-viewer{flex:1;width:100%;min-height:52dvh;background:radial-gradient(ellipse at 50% 35%,#2a2e36 0%,#14161a 70%);--poster-color:transparent}
-  footer{padding:12px 20px calc(env(safe-area-inset-bottom) + 22px);text-align:center}
-  #place{display:block;width:100%;max-width:420px;margin:0 auto;padding:20px;font-size:21px;font-weight:700;letter-spacing:.03em;
-    color:#1a1508;background:var(--accent);border:0;border-radius:16px;box-shadow:0 8px 24px rgba(217,181,107,.25);cursor:pointer}
-  #place:active{transform:scale(.98)}
-  .hint{margin:14px auto 0;max-width:420px;font-size:15px;line-height:1.4;opacity:.85}
-  .note{margin:10px auto 0;max-width:420px;font-size:13px;opacity:.6;display:none}
-  /* hide model-viewer's own AR button; we trigger AR from #place */
-  model-viewer::part(default-ar-button){display:none}
-</style>
+<script src="vendor/jsfeat-min.js"></script>
+<script type="module" src="vendor/model-viewer.min.js"></script>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>AR STATUE APP</h1>
-  <p class="sub">Life-size stone statue · 1.8 m tall</p>
-</header>
 
-<model-viewer id="mv"
-  src="statue.glb"
-  ios-src="statue.usdz"
-  alt="A life-size stone statue block on a plinth"
-  ar
-  ar-modes="webxr scene-viewer quick-look"
-  ar-placement="floor"
-  ar-scale="fixed"
-  camera-controls
-  touch-action="pan-y"
-  camera-orbit="30deg 75deg 4.2m"
-  shadow-intensity="1"
-  shadow-softness="0.8"
-  exposure="1.05"
-  environment-image="neutral"
-  xr-environment>
-  <button slot="ar-button" style="display:none"></button>
-</model-viewer>
+<!-- HOME -->
+<section id="home" class="screen active">
+  <header><h1>AR STATUE APP</h1><p class="sub">Life-size stone statue · 1.8 m tall</p></header>
+  <model-viewer id="mv" src="statue.glb" ios-src="statue.usdz" alt="Life-size stone statue on a plinth"
+    camera-controls touch-action="pan-y" camera-orbit="30deg 75deg 4.2m" shadow-intensity="1" shadow-softness="0.8"
+    exposure="1.05" environment-image="neutral"></model-viewer>
+  <div class="panel">
+    <ol class="gates">
+      <li id="g1"><span class="dot"></span><b>Gate 1 · Device</b><small id="g1t">AR + camera check</small></li>
+      <li id="g2"><span class="dot"></span><b>Gate 2 · Room</b><small id="g2t">Recognize this room</small></li>
+      <li id="g3"><span class="dot"></span><b>Statue corner</b><small id="g3t">Not marked yet</small></li>
+    </ol>
+    <button id="startBtn" class="big">Start</button>
+    <div class="row">
+      <button id="remarkBtn" class="ghost" hidden>Re-mark corner</button>
+      <button id="forgetBtn" class="ghost small" hidden>Forget saved rooms</button>
+    </div>
+    <p class="msg" id="homeMsg"></p>
+  </div>
+</section>
 
-<footer>
-  <button id="place">Place Statue</button>
-  <p class="hint">Point your camera at the ground and move your phone slowly until the floor is found. Then tap to set the statue down. It stays locked in place as you walk around it.</p>
-  <p class="note" id="note">AR needs an iPhone/iPad (Safari) or an ARCore Android phone (Chrome). On this device you can spin the 3D preview above.</p>
-</footer>
+<!-- CAMERA (room setup / recognition / corner capture / corner guide) -->
+<section id="cam" class="screen">
+  <div class="camwrap">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="frame"></div>
+    <img id="thumb" class="thumb" alt="Saved corner" hidden>
+  </div>
+  <div class="panel">
+    <h2 id="camTitle">…</h2>
+    <p id="camText" class="hint"></p>
+    <input id="roomName" type="text" placeholder="Room name (e.g. Living room)" hidden>
+    <div id="meterWrap" class="meter" hidden><div id="meter"></div><span id="meterTxt"></span></div>
+    <button id="camPrimary" class="big">…</button>
+    <div class="row">
+      <button id="camAlt" class="ghost" hidden></button>
+      <button id="camAlt2" class="ghost" hidden></button>
+      <button id="camBack" class="ghost">Back</button>
+    </div>
+  </div>
+</section>
 
-<script type="module">
-  const mv = document.getElementById('mv');
-  const btn = document.getElementById('place');
-  const note = document.getElementById('note');
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+<!-- WebXR DOM overlay (Android) -->
+<div id="xr-overlay" hidden>
+  <p id="xrStatus">Starting AR…</p>
+  <div class="xrbtns">
+    <button id="xrPlace" class="big">Place Statue Here</button>
+    <button id="xrExit" class="ghost">Exit AR</button>
+  </div>
+</div>
 
-  // iOS fallback: open Quick Look directly (ARKit plane detection + world anchoring), true scale.
-  function openQuickLook(){
-    const a = document.createElement('a');
-    a.setAttribute('rel','ar');
-    a.href = new URL('statue.usdz#allowsContentScaling=0', location.href).href;
-    const img = document.createElement('img'); a.appendChild(img); // Quick Look requires an <img> child
-    document.body.appendChild(a); a.click(); a.remove();
-  }
-
-  btn.addEventListener('click', async () => {
-    try {
-      await customElements.whenDefined('model-viewer');
-      if (mv.canActivateAR) { mv.activateAR(); return; }
-    } catch(e) {}
-    if (isIOS) { openQuickLook(); return; }
-    note.style.display = 'block';
-  });
-
-  mv.addEventListener('ar-status', e => {
-    if (e.detail.status === 'failed') {
-      if (isIOS) openQuickLook(); else note.style.display = 'block';
-    }
-  });
-
-  // On desktop, reveal the note once we know AR isn't available.
-  mv.addEventListener('load', () => {
-    if (!mv.canActivateAR && !isIOS) note.style.display = 'block';
-  });
-</script>
+<button id="playAgain" class="floating" hidden>▶ Play activation</button>
+<script type="module" src="src/app.js"></script>
 </body>
 </html>
