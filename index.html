@@ -15,7 +15,7 @@
 
 <!-- HOME -->
 <section id="home" class="screen active">
-  <header><button id="gear" class="gear" aria-label="Settings">⚙︎</button><h1>AR STATUE APP</h1><p class="sub">Life-size stone statue · 1.8 m tall</p></header>
+  <header><button id="gear" class="gear" aria-label="Settings">⚙︎</button><h1>AR STATUE APP</h1><p class="sub" id="homeSub">Life-size stone statue · 1.8 m tall</p></header>
   <model-viewer id="mv" src="statue.glb" ios-src="statue.usdz" alt="Life-size stone statue on a plinth"
     camera-controls touch-action="pan-y" camera-orbit="30deg 75deg 4.2m" shadow-intensity="1" shadow-softness="0.8"
     exposure="1.05" environment-image="neutral"></model-viewer>
@@ -40,7 +40,7 @@
   <header><h1>STATUE ZONE</h1><p class="sub" id="gpsStepSub">Setup step 1 of 3</p></header>
   <div class="panel">
     <h2>Capture your location</h2>
-    <p class="hint">Stand in the room where the statue will go (your hotel room). This spot becomes the centre of the statue zone. It's saved on this phone only.</p>
+    <p class="hint" id="gpsHint">Stand in the room where the statue will go (your hotel room). This spot becomes the centre of the statue zone. It's saved on this phone only.</p>
     <div class="readout" id="gpsReadout">Waiting for GPS…</div>
     <label class="lbl">Zone radius (m)<input id="gpsRadius" type="number" min="10" max="2000" value="75"></label>
     <button id="gpsUse" class="big" disabled>Use This Location</button>
@@ -50,8 +50,15 @@
 
 <!-- SETTINGS -->
 <section id="settings" class="screen">
-  <header><h1>SETTINGS</h1><p class="sub">Saved on this phone only</p></header>
+  <header><h1>SETTINGS</h1><p class="sub" id="setSub">Saved on this phone only</p></header>
   <div class="panel">
+    <div id="setShared" hidden>
+      <h2>Shared statue site</h2>
+      <div class="readout" id="setSiteReadout"></div>
+      <p class="hint">This site was published by its creator. It’s read-only here; nothing you do changes it.</p>
+      <div class="row"><button id="setLeave" class="ghost small">Leave shared site (use my own setup)</button></div>
+    </div>
+    <div id="setPersonal">
     <h2>Statue zone</h2>
     <div class="readout" id="setReadout"></div>
     <label class="lbl">Latitude<input id="setLat" type="number" step="any"></label>
@@ -70,7 +77,35 @@
       <button id="setManual" class="ghost small">Skip room match (setup/debug)</button>
       <button id="setForget" class="ghost small">Forget everything</button>
     </div>
+    <h2 style="margin-top:18px">Share with other people</h2>
+    <p class="hint">Program this location once so anyone with the link gets a ready-made statue: no setup on their phone.</p>
+    <div class="row"><button id="setAdmin" class="ghost">Create shared site</button></div>
+    </div>
     <div class="row"><button id="setBack" class="big" style="margin-top:12px">Done</button></div>
+  </div>
+</section>
+
+<!-- CREATOR: shared site -->
+<section id="admin" class="screen">
+  <header><h1>SHARED SITE</h1><p class="sub">Creator mode · visitors get a read-only copy</p></header>
+  <div class="panel">
+    <label class="lbl">Site name<input id="adName" type="text" maxlength="80" placeholder="e.g. Hotel Room 412"></label>
+    <div class="readout" id="adStatus"></div>
+    <button id="adCapture" class="big">Capture site here</button>
+    <div class="row"><button id="adFromMine" class="ghost" hidden>Use my current setup instead</button></div>
+    <div id="adReady" hidden>
+      <h2 style="margin-top:18px">Publish</h2>
+      <label class="lbl">Admin passphrase<input id="adPass" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false"></label>
+      <label class="chk"><input id="adRemember" type="checkbox"> Remember on this phone</label>
+      <button id="adPublish" class="big">Publish site</button>
+      <p class="msg" id="adMsg"></p>
+      <div id="adLinkBox" hidden>
+        <div class="readout" id="adLink"></div>
+        <div class="row"><button id="adCopy" class="ghost">Copy link</button><button id="adShare" class="ghost">Share…</button><button id="adOpen" class="ghost">Open as visitor</button></div>
+      </div>
+      <div class="row"><button id="adDownload" class="ghost small">Export package (.json)</button><button id="adDiscard" class="ghost small">Discard draft</button></div>
+    </div>
+    <div class="row"><button id="adBack" class="ghost" style="margin-top:12px">Done</button></div>
   </div>
 </section>
 

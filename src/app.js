@@ -1,10 +1,18 @@
-import { liveFeatures, refFeatures, thumbnail, match } from './vision.js';
+import { liveFeatures, refFeatures, thumbnail, match, encodeFP, decodeFP } from './vision.js';
 
 const $ = id => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
 const DEBUG = Q.has('debug');               // desktop testing: pretend AR exists (?debug=ios | ?debug=android)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const ROOM_MATCH = 20, CORNER_MATCH = 18, STREAK = 3, ROOM_TIMEOUT_MS = 25000, ZKEY = 'ar-statue-zone';
+// Shared sites: ?site=<id> = visitor (read-only copy of a published site); ?admin=1 = creator mode.
+const API = 'https://ar-statue-sites.vercel.app/api/sites';
+const SITE_ID = (Q.get('site') || '').toLowerCase().trim();
+const VISITOR = /^[a-z0-9][a-z0-9-]{2,39}$/.test(SITE_ID);
+const ADMIN = Q.get('admin') === '1' && !VISITOR;
+// Visitors use a different phone than the one that captured the site, so accept slightly fewer inliers
+// (unrelated scenes score ~0, so this stays safe).
+const ROOM_MATCH = VISITOR ? 16 : 20, CORNER_MATCH = VISITOR ? 15 : 18, STREAK = 3, ROOM_TIMEOUT_MS = 25000, ZKEY = 'ar-statue-zone';
+let site = null, siteErr = false;
 
 /* ---------------- storage: IndexedDB + localStorage, on this phone only ---------------- */
 const db = (() => {
@@ -25,12 +33,49 @@ const zone = {
   reset() { localStorage.removeItem(ZKEY); },
   // URL params ?lat=&lon=&radius= override for this visit only (not saved)
   get() {
+    if (VISITOR) return site ? { ...site.zone, shared: true } : null;   // published zone; no URL override for visitors
     const s = this.saved(), lat = parseFloat(Q.get('lat')), lon = parseFloat(Q.get('lon')), r = parseFloat(Q.get('radius'));
     if (!isNaN(lat) && !isNaN(lon)) return { lat, lon, radius: !isNaN(r) ? r : (s && s.radius) || 75, override: true };
     if (s && !isNaN(r)) return { ...s, radius: r, override: true };
     return s;
   },
 };
+
+/* ---------------- shared site packages ---------------- */
+async function loadSite() {
+  // Published via the API (Vercel Blob); fallback: a package committed to this repo at sites/<id>.json
+  for (const u of [API + '?id=' + encodeURIComponent(SITE_ID), 'sites/' + SITE_ID + '.json']) {
+    try { const r = await fetch(u, { cache: 'no-store' }); if (r.ok) { const p = await r.json(); if (p && p.v === 1 && p.zone && p.room && p.corner) return p; } } catch {}
+  }
+  return null;
+}
+const siteLocalKey = id => 'ar-statue-site-' + id;   // this device's own anchor handle / fallback for a shared site
+function siteRoom(p) {
+  let local = {}; try { local = JSON.parse(localStorage.getItem(siteLocalKey(p.id))) || {}; } catch {}
+  return { id: 'site:' + p.id, siteId: p.id, shared: true, name: p.name,
+    views: p.room.views.map(v => ({ fp: decodeFP(v.fp), photo: v.thumb })),
+    corner: { fps: p.corner.refs.map(decodeFP), photo: p.corner.thumb, handle: local.handle || null, fallback: local.fallback || null } };
+}
+async function saveRoom(room) {
+  if (room.shared) { localStorage.setItem(siteLocalKey(room.siteId), JSON.stringify({ handle: room.corner.handle, fallback: room.corner.fallback })); return; }
+  await db.put(room);
+}
+const cornerScore = (live, c) => Math.max(0, ...(c.fps || [c.fp]).map(f => match(live, f).inliers));
+function shrink(dataURL, w, q) {
+  return new Promise(res => { const i = new Image(); i.onload = () => {
+    const c = document.createElement('canvas'); c.width = Math.min(w, i.width); c.height = Math.round(c.width * i.height / i.width);
+    c.getContext('2d').drawImage(i, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', q)); }; i.onerror = () => res(dataURL); i.src = dataURL; });
+}
+async function buildPackage({ name, zone: z, views, corner, id, created }) {
+  return { v: 1, ...(id ? { id } : {}), name: (name || 'Statue site').trim().slice(0, 80), created: created || new Date().toISOString(),
+    zone: { lat: +z.lat, lon: +z.lon, radius: +z.radius || 75 },
+    room: { views: await Promise.all(views.map(async v => ({ fp: encodeFP(v.fp), thumb: await shrink(v.photo, 160, 0.6) }))) },
+    corner: { refs: corner.fps.map(encodeFP), thumb: await shrink(corner.photo, 360, 0.7) } };
+}
+const DKEY = 'ar-statue-site-draft', PKEY = 'ar-statue-admin-pass';
+const draft = { get() { try { return JSON.parse(localStorage.getItem(DKEY)); } catch { return null; } },
+                set(p) { localStorage.setItem(DKEY, JSON.stringify(p)); }, clear() { localStorage.removeItem(DKEY); } };
+const shareURL = id => new URL('?site=' + id, location.origin + location.pathname).href;
 
 /* ---------------- GPS geofence (Gate 1) ---------------- */
 const geo = { fix: null, err: null, id: null };
@@ -85,7 +130,7 @@ window.addEventListener('focus', resumeIfInterrupted);
 window.addEventListener('pageshow', resumeIfInterrupted);
 
 /* ---------------- UI helpers ---------------- */
-function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id)); if (id === 'home') renderHome(); }
+function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id)); if (id === 'home') renderHome(); if (id === 'admin') renderAdmin(); }
 function gate(n, state, text) { const li = $('g' + n); li.className = state || ''; if (text) $('g' + n + 't').textContent = text; }
 function cam(opts) {
   $('camTitle').textContent = opts.title; $('camText').textContent = opts.text || '';
@@ -129,7 +174,7 @@ async function needCamera() {
 
 /* ---------------- home ---------------- */
 let rooms = [], busy = false;
-async function loadRooms() { rooms = await db.all().catch(() => []); }
+async function loadRooms() { rooms = VISITOR ? (site ? [siteRoom(site)] : []) : await db.all().catch(() => []); }
 function setupComplete() { return !!zone.get() && rooms.length > 0 && rooms.some(r => r.corner); }
 function renderHome() {
   const card = $('zoneCard'), st = zoneState();
@@ -138,6 +183,11 @@ function renderHome() {
     $('scanBtn').hidden = !scan; $('setupBtn').hidden = !setup; if (setup) $('setupBtn').textContent = setup;
   };
   if (arOK === false) { set('warn', 'This browser can’t do AR', 'Open this page in Safari on iPhone/iPad, or Chrome on an ARCore Android phone.', false, null); return; }
+  if (VISITOR && !site) {
+    set(siteErr ? 'warn' : 'calm', siteErr ? 'Statue site not found' : 'Loading statue site…',
+        siteErr ? `There’s no published statue site called “${SITE_ID}”, or it couldn’t be reached. Check the link and your connection, then reload.` : 'Fetching the published location and room.', false, null);
+    gate(1, siteErr ? 'bad' : 'run', siteErr ? 'Site not found' : 'Loading site'); return;
+  }
   if (!setupComplete()) {
     const steps = [!zone.get() && 'GPS zone', !rooms.length && '3 room views', !rooms.some(r => r.corner) && 'statue corner'].filter(Boolean);
     set('', 'Set up your statue', `Stand in the room where the statue goes (your hotel room). Setup captures: ${steps.join(', ')}.`, false, 'Start setup');
@@ -158,8 +208,10 @@ function renderHome() {
 }
 
 /* ---------------- setup ---------------- */
-async function captureZone(stepText) {
+async function captureZone(stepText, persist = true) {
   show('gpsStep'); $('gpsStepSub').textContent = stepText;
+  $('gpsHint').textContent = persist ? 'Stand in the room where the statue will go (your hotel room). This spot becomes the centre of the statue zone. It\'s saved on this phone only.'
+    : 'Stand in the room where the statue will go. This spot becomes the centre of the shared statue zone, and it becomes public in the site link once you publish.';
   const z = zone.saved(); $('gpsRadius').value = (z && z.radius) || 75;
   startGeo();
   const upd = () => {
@@ -173,23 +225,29 @@ async function captureZone(stepText) {
   const r = await race(['gpsUse', 'gpsBack']);
   geoListeners = geoListeners.filter(f => f !== upd);
   if (r === 'gpsBack' || !geo.fix) return false;
-  zone.save({ lat: geo.fix.lat, lon: geo.fix.lon, radius: parseFloat($('gpsRadius').value) || 75 });
+  const fix = { lat: geo.fix.lat, lon: geo.fix.lon, radius: parseFloat($('gpsRadius').value) || 75, acc: geo.fix.acc };
+  if (!persist) return fix;
+  zone.save(fix);
   gate(1, 'ok', 'Zone saved'); return true;
 }
-async function captureRoomViews(stepText, existing) {
+async function captureRoomViews(stepText, existing, opts = {}) {
+  const N = opts.count || 3, persist = opts.persist !== false;
   show('cam'); if (!(await needCamera())) return null;
   const views = [];
-  cam({ title: 'Capture 3 room views', text: `${stepText}: from where you usually stand, capture left, center and right. Aim at things that don't move (walls, windows, furniture).`,
-        nameInput: true, primary: 'Capture view 1 of 3' });
+  cam({ title: `Capture ${N} room views`, text: N > 3
+          ? `${stepText}: capture left, center, right, then one from the doorway. Aim at things that don't move (walls, windows, furniture), not people or bags. More views = easier match on other phones.`
+          : `${stepText}: from where you usually stand, capture left, center and right. Aim at things that don't move (walls, windows, furniture).`,
+        nameInput: persist, primary: `Capture view 1 of ${N}` });
   $('roomName').value = existing ? existing.name : 'Hotel room';
-  while (views.length < 3) {
+  while (views.length < N) {
     const r = await race(['camPrimary', 'camBack']);
     if (r === 'camBack') return null;
     const fp = refFeatures($('video'));
     if (!fp || fp.n < 40) { $('camText').textContent = 'Not enough detail in that view. Aim at something with more texture and try again.'; continue; }
     views.push({ fp, photo: thumbnail($('video'), 320, 0.7) });
-    $('camPrimary').textContent = views.length < 3 ? `Capture view ${views.length + 1} of 3` : 'Saving…';
+    $('camPrimary').textContent = views.length < N ? `Capture view ${views.length + 1} of ${N}` : 'Saving…';
   }
+  if (!persist) return { views };
   const room = existing || { id: 'room-' + Date.now(), corner: null, created: new Date().toISOString() };
   room.name = ($('roomName').value || 'Hotel room').trim(); room.views = views;
   await db.put(room); await loadRooms();
@@ -209,14 +267,29 @@ async function runSetup() {
   $('homeMsg').textContent = 'Setup done. When you’re in the zone, tap Scan Room to place the statue.';
 }
 
+async function captureCornerRefs(stepText, n = 2) {
+  show('cam'); if (!(await needCamera())) return null;
+  const fps = []; let photo = null;
+  cam({ title: 'Mark the statue corner', text: `${stepText}: aim at the corner where the statue should stand, with the floor and both walls in view.`, primary: `Capture corner 1 of ${n}` });
+  while (fps.length < n) {
+    const r = await race(['camPrimary', 'camBack']); if (r === 'camBack') return null;
+    const fp = refFeatures($('video'));
+    if (!fp || fp.n < 40) { $('camText').textContent = 'Not enough detail. Step back a little so more of the corner shows, then try again.'; continue; }
+    fps.push(fp); if (!photo) photo = thumbnail($('video'), 480, 0.8);
+    if (fps.length < n) { $('camText').textContent = 'Got it. Now take one step to the side (or crouch a bit) and capture the same corner again. This helps other phones recognise it.'; $('camPrimary').textContent = `Capture corner ${fps.length + 1} of ${n}`; }
+  }
+  return { fps, photo };
+}
+
 /* ---------------- Gate 2: room match ---------------- */
 async function scanRoom() {
   show('cam'); if (!(await needCamera())) return null;
   gate(2, 'run', 'Scanning…');
   for (;;) {
-    cam({ title: 'Scan Room', text: 'Slowly aim around the room the way you did at setup.', meter: true });
+    cam({ title: 'Scan Room', text: VISITOR ? 'Slowly aim around the room at walls, windows and furniture, like the photo in the corner.' : 'Slowly aim around the room the way you did at setup.',
+          meter: true, thumb: VISITOR && rooms[0] && rooms[0].views[0] ? rooms[0].views[0].photo : null });
     const res = await new Promise(resolve => {
-      const views = rooms.flatMap(r => (r.views || []).map(v => ({ room: r, fp: v.fp })));
+      const views = rooms.flatMap(r => (r.views || []).map(v => ({ room: r, fp: v.fp, photo: v.photo })));
       const scores = new Map(); let i = 0, streak = 0; const t0 = Date.now();
       startLoop(() => {
         const live = liveFeatures($('video')); if (!live) return;
@@ -224,7 +297,8 @@ async function scanRoom() {
         let best = null, bs = 0; for (const [v, s] of scores) if (s > bs) { bs = s; best = v; }
         const left = Math.max(0, Math.ceil((ROOM_TIMEOUT_MS - (Date.now() - t0)) / 1000));
         setMeter(bs / ROOM_MATCH, bs >= ROOM_MATCH ? 'Room matched ✓' : `matching ${bs}/${ROOM_MATCH} · ${left}s`);
-        streak = bs >= ROOM_MATCH ? streak + 1 : 0;
+        if (VISITOR && best && best.photo && bs > 0) $('thumb').src = best.photo;
+        streak = bs >= ROOM_MATCH ? streak + 1 : Math.max(0, streak - 1);
         if (streak >= STREAK) { stopLoop(); resolve(best.room); }
         else if (Date.now() - t0 > ROOM_TIMEOUT_MS) { stopLoop(); resolve('timeout'); }
       });
@@ -233,7 +307,7 @@ async function scanRoom() {
     if (res && res !== 'timeout') { gate(2, 'ok', 'Matched: ' + res.name); return res; }
     if (res === null) { gate(2, '', 'Scan when inside the zone'); return null; }
     gate(2, 'bad', 'No match');
-    cam({ title: 'This isn’t the right room', text: 'The camera view doesn’t match the room you set up. Stand where you captured the room views and try again.', primary: 'Try Again' });
+    cam({ title: 'This isn’t the right room', text: VISITOR ? 'The camera view doesn’t match the statue room. Make sure you’re in the right room, turn on the lights, and aim at the walls and windows.' : 'The camera view doesn’t match the room you set up. Stand where you captured the room views and try again.', primary: 'Try Again' });
     const r = await race(['camPrimary', 'camBack']);
     if (r === 'camBack') return null;
   }
@@ -251,7 +325,7 @@ async function markCorner(room, stepText) {
     room.corner = { fp, photo: thumbnail($('video'), 480, 0.8), markedAt: new Date().toISOString(), handle: null, fallback: null };
     break;
   }
-  await db.put(room); await loadRooms();
+  await saveRoom(room); await loadRooms();
   if (platform === 'ios') { gate(3, 'ok', 'Corner photo saved'); return true; }
   cam({ title: 'Now tap the floor in the corner', text: 'AR will open. Put the ring on the floor in your corner and tap Mark Corner. The statue appears there, locked.', primary: 'Open AR', thumb: room.corner.photo });
   const r = await race(['camPrimary', 'camBack']); if (r === 'camBack') return true;
@@ -275,11 +349,11 @@ function runXR(room, mode) {
             newPlacement(); playActivation();
             room.corner.handle = info.handle || null;
             room.corner.fallback = Object.assign(room.corner.fallback || {}, { viewDist: info.viewDist, viewHeight: info.viewHeight, savedAt: new Date().toISOString() });
-            await db.put(room);
+            await saveRoom(room);
             gate(3, 'ok', info.handle ? 'Corner anchored (persistent)' : 'Corner anchored (this session) + photo guide saved');
           }
         },
-        onYawRel: async y => { room.corner.fallback = Object.assign(room.corner.fallback || {}, { yawRel: y }); await db.put(room); },
+        onYawRel: async y => { room.corner.fallback = Object.assign(room.corner.fallback || {}, { yawRel: y }); await saveRoom(room); },
         onEnd: () => { ov.hidden = true; show('home'); resolve(); } });
     } catch (e) { ov.hidden = true; $('homeMsg').textContent = 'Could not start AR: ' + e.message; show('home'); resolve(); }
   });
@@ -288,18 +362,18 @@ function runXR(room, mode) {
 /* ---------------- corner: guide + place ---------------- */
 async function placeAtCorner(room) {
   if (platform === 'android' && room.corner.handle && xr.persistentSupported()) {
-    show('cam'); cam({ title: 'Restore statue', text: 'Your corner has a saved anchor. Open AR and look toward the corner.', primary: 'Open AR', thumb: room.corner.photo, alt: 'Re-mark corner' });
+    show('cam'); cam({ title: 'Restore statue', text: 'Your corner has a saved anchor. Open AR and look toward the corner.', primary: 'Open AR', thumb: room.corner.photo, alt: VISITOR ? null : 'Re-mark corner' });
     const r = await race(['camPrimary', 'camAlt', 'camBack']);
     if (r === 'camBack') return; if (r === 'camAlt') { await markCorner(room); return; }
     cameraOff(); await runXR(room, 'restore'); return;
   }
   show('cam'); if (!(await needCamera())) return;
-  cam({ title: 'Aim at your saved corner', text: 'Match the photo in the corner of the screen. Place Statue Here unlocks when the view matches.',
-        meter: true, primary: 'Place Statue Here', primaryDisabled: true, thumb: room.corner.photo, alt: 'Re-mark corner' });
+  cam({ title: VISITOR ? 'Aim at the statue corner' : 'Aim at your saved corner', text: 'Match the photo in the corner of the screen. Place Statue Here unlocks when the view matches.',
+        meter: true, primary: 'Place Statue Here', primaryDisabled: true, thumb: room.corner.photo, alt: VISITOR ? null : 'Re-mark corner' });
   let streak = 0;
   startLoop(() => {
     const live = liveFeatures($('video')); if (!live) return;
-    const s = match(live, room.corner.fp).inliers;
+    const s = cornerScore(live, room.corner);
     streak = s >= CORNER_MATCH ? streak + 1 : Math.max(0, streak - 1);
     const ok = streak >= STREAK;
     setMeter(s / CORNER_MATCH, ok ? 'Corner matched ✓' : `match ${s}/${CORNER_MATCH}`);
@@ -325,10 +399,10 @@ function openQuickLook() {
 }
 
 /* ---------------- flows ---------------- */
-async function guarded(fn) {
+async function guarded(fn, back = 'home') {
   if (busy) return; busy = true; $('homeMsg').textContent = '';
-  try { await fn(); } catch (e) { $('homeMsg').textContent = 'Something went wrong: ' + e.message; }
-  finally { cameraOff(); busy = false; if ($('xr-overlay').hidden) show('home'); }
+  try { await fn(); } catch (e) { $(back === 'admin' ? 'adMsg' : 'homeMsg').textContent = 'Something went wrong: ' + e.message; }
+  finally { cameraOff(); busy = false; if ($('xr-overlay').hidden) show(back); }
 }
 async function scanFlow() {
   if (zoneState().k !== 'inside') { renderHome(); return; }     // Gate 1
@@ -343,6 +417,13 @@ $('scanBtn').onclick = () => { unlockAudio(); guarded(scanFlow); };
 /* ---------------- settings ---------------- */
 function renderSettings() {
   const z = zone.get(), st = zoneState(), f = geo.fix;
+  $('setShared').hidden = !VISITOR; $('setPersonal').hidden = VISITOR;
+  $('setSub').textContent = VISITOR ? 'Shared statue site · read-only' : 'Saved on this phone only';
+  if (VISITOR) {
+    $('setSiteReadout').textContent = site ? `${site.name}\nzone radius ${site.zone.radius} m · ${site.room.views.length} room views · ${site.corner.refs.length} corner refs\nupdated ${(site.updated || site.created || '').slice(0, 10)}` +
+      (f ? `\nyou    ±${Math.round(f.acc)} m` : `\nyou    ${geo.err || 'waiting for GPS'}`) + (st.d !== undefined ? `\n${st.k.toUpperCase()} · ${fmtM(st.d)} from centre (pass ≤ ${fmtM(st.allow)})` : '') : 'Site not loaded.';
+    return;
+  }
   $('setLat').value = z ? z.lat : ''; $('setLon').value = z ? z.lon : ''; $('setRad').value = z ? z.radius : 75;
   $('setReadout').textContent = (z ? `centre ${z.lat.toFixed(6)}, ${z.lon.toFixed(6)} · radius ${z.radius} m${z.override ? ' (URL override)' : ''}` : 'No zone saved') +
     '\n' + (f ? `you    ${f.lat.toFixed(6)}, ${f.lon.toFixed(6)} ±${Math.round(f.acc)} m` : `you    ${geo.err || 'waiting for GPS'}`) +
@@ -373,11 +454,84 @@ $('setManual').onclick = () => { unlockAudio(); guarded(async () => {   // debug
 }); };
 $('setForget').onclick = async () => { if (confirm('Forget the zone, rooms and corner on this phone?')) { zone.reset(); await db.clear(); await loadRooms(); renderSettings(); } };
 
+$('setLeave').onclick = () => { location.href = location.pathname; };
+$('setAdmin').onclick = () => show('admin');
+
+/* ---------------- creator mode: capture, export, publish ---------------- */
+function renderAdmin() {
+  const d = draft.get();
+  $('adFromMine').hidden = !setupComplete() || !zone.saved();
+  $('adReady').hidden = !d;
+  if (!$('adName').value) $('adName').value = d ? d.name : (rooms[0] && rooms[0].name) || '';
+  if (!$('adPass').value) { const p = localStorage.getItem(PKEY); if (p) { $('adPass').value = p; $('adRemember').checked = true; } }
+  $('adCapture').textContent = d ? 'Re-capture site here' : 'Capture site here';
+  $('adStatus').textContent = d
+    ? `${d.name}\nzone ${d.zone.lat.toFixed(6)}, ${d.zone.lon.toFixed(6)} · radius ${d.zone.radius} m\n${d.room.views.length} room views · ${d.corner.refs.length} corner refs · ${Math.round(JSON.stringify(d).length / 1024)} KB\n` +
+      (d.id ? `published as “${d.id}”${d.publishedAt ? ' · ' + d.publishedAt.slice(0, 16).replace('T', ' ') + ' UTC' : ''}` : 'not published yet')
+    : 'No site captured yet.\nStand in the statue room and tap Capture site here. You’ll capture: GPS zone → 4 room views → the corner (2 photos).';
+  $('adLinkBox').hidden = !(d && d.id);
+  if (d && d.id) $('adLink').textContent = shareURL(d.id);
+}
+function keepId(old) {
+  return old && old.id && confirm(`Update the published site “${old.id}” (same link)?\n\nOK = update it · Cancel = make a new site with a new link`) ? old.id : undefined;
+}
+$('adCapture').onclick = () => guarded(async () => {
+  if (!(await checkDevice())) return;
+  const name = $('adName').value.trim() || 'Statue site';
+  const z = await captureZone('Shared site · step 1 of 3', false); if (!z) return;
+  const rv = await captureRoomViews('Shared site · step 2 of 3', null, { persist: false, count: 4 }); if (!rv) return;
+  const corner = await captureCornerRefs('Shared site · step 3 of 3', 2); if (!corner) return;
+  cameraOff();
+  const old = draft.get();
+  draft.set(await buildPackage({ name, zone: z, views: rv.views, corner, id: keepId(old) }));
+  $('adMsg').textContent = 'Site captured. Publish it to get the share link.';
+}, 'admin');
+$('adFromMine').onclick = () => guarded(async () => {
+  const r = rooms.find(x => x.corner) || rooms[0], z = zone.saved();
+  const old = draft.get();
+  draft.set(await buildPackage({ name: $('adName').value.trim() || r.name, zone: z, views: r.views,
+    corner: { fps: r.corner.fps || [r.corner.fp], photo: r.corner.photo }, id: keepId(old) }));
+  $('adMsg').textContent = 'Draft made from your current setup. Publish it to get the share link.';
+}, 'admin');
+$('adPublish').onclick = async () => {
+  const d = draft.get(), pass = $('adPass').value; if (!d) return;
+  if (!pass) { $('adMsg').textContent = 'Enter the admin passphrase.'; return; }
+  d.name = $('adName').value.trim() || d.name;
+  $('adPublish').disabled = true; $('adMsg').textContent = 'Publishing…';
+  try {
+    const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-passphrase': pass }, body: JSON.stringify(d) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $('adMsg').textContent = r.status === 401 ? 'Wrong passphrase.' : r.status === 503 ? 'Publishing isn’t switched on yet (no admin passphrase on the server).' : 'Publish failed: ' + (j.error || r.status); return; }
+    d.id = j.id; d.publishedAt = new Date().toISOString(); draft.set(d);
+    if ($('adRemember').checked) localStorage.setItem(PKEY, pass); else localStorage.removeItem(PKEY);
+    $('adMsg').textContent = 'Published ✓ Anyone with the link gets this statue site.';
+  } catch (e) { $('adMsg').textContent = 'Couldn’t reach the publishing server. Check your connection, or use Export package and send the file instead.'; }
+  finally { $('adPublish').disabled = false; renderAdmin(); }
+};
+$('adCopy').onclick = async () => { const d = draft.get(); try { await navigator.clipboard.writeText(shareURL(d.id)); $('adMsg').textContent = 'Link copied.'; } catch { $('adMsg').textContent = shareURL(d.id); } };
+$('adShare').onclick = () => { const d = draft.get(); if (navigator.share) navigator.share({ title: 'AR Statue · ' + d.name, text: 'Open this in the statue room:', url: shareURL(d.id) }).catch(() => {}); else $('adCopy').onclick(); };
+$('adOpen').onclick = () => { const d = draft.get(); location.href = shareURL(d.id); };
+$('adDownload').onclick = async () => {
+  const d = draft.get(); if (!d) return; d.name = $('adName').value.trim() || d.name;
+  const fname = (d.id || d.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'statue-site') + '.json';
+  const file = new File([JSON.stringify(d)], fname, { type: 'application/json' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: fname }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+};
+$('adDiscard').onclick = () => { if (confirm('Discard this draft on this phone? (A published site stays online.)')) { draft.clear(); $('adMsg').textContent = ''; renderAdmin(); } };
+$('adBack').onclick = () => show('home');
+
 /* ---------------- boot ---------------- */
 (async () => {
+  if (VISITOR) {
+    $('gear').hidden = false; renderHome();
+    site = await loadSite(); siteErr = !site;
+    if (site) $('homeSub').textContent = 'Shared statue site · ' + site.name;
+  }
   await loadRooms();
   await checkDevice();
   if (zone.get()) startGeo();
   renderHome();
+  if (ADMIN) show('admin');
 })();
-window.__statue = { db, match, liveFeatures, refFeatures, zoneState, get placement() { return placement; }, get geo() { return geo; } };
+window.__statue = { db, match, liveFeatures, refFeatures, zoneState, draft, get site() { return site; }, get rooms() { return rooms; }, get placement() { return placement; }, get geo() { return geo; } };

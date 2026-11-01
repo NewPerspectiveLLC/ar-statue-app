@@ -1,10 +1,22 @@
 // ORB visual fingerprints (jsfeat) for room recognition and corner matching.
-// Everything stays on the phone (IndexedDB). Nothing is uploaded.
+// Personal setups stay on the phone (IndexedDB). Shared sites export these fingerprints (encodeFP/decodeFP).
 const J = window.jsfeat;
 export const PW = 320;              // processing width
 const MAX_LIVE = 300, MAX_REF = 500;
 const u_max = new Int32Array([15,15,15,15,14,14,14,13,13,12,11,10,9,8,6,3,0]);
 let gray = null, blur = null, corners = [];
+export const EQ = { on: true };
+// Gentle contrast stretch (1st..99th percentile -> 0..255): evens out exposure/brightness between phones
+// without the noise blow-up of full histogram equalization.
+const hist = new Int32Array(256), lut = new Uint8Array(256);
+function stretch(m) {
+  const d = m.data, n = m.cols * m.rows; hist.fill(0); for (let i = 0; i < n; i++) hist[d[i]]++;
+  let lo = 0, hi = 255, acc = 0; const cut = n * 0.01;
+  while (lo < 255 && (acc += hist[lo]) < cut) lo++; acc = 0; while (hi > 0 && (acc += hist[hi]) < cut) hi--;
+  if (hi - lo < 16) return; const k = 255 / (hi - lo);
+  for (let v = 0; v < 256; v++) lut[v] = v <= lo ? 0 : v >= hi ? 255 : Math.round((v - lo) * k);
+  for (let i = 0; i < n; i++) d[i] = lut[d[i]];
+}
 const cvs = document.createElement('canvas');
 const ctx = cvs.getContext('2d', { willReadFrequently: true });
 
@@ -28,6 +40,7 @@ function icAngle(img, px, py) {
 function featuresFromImageData(id, w, h, maxN, scaleBack = 1) {
   ensure(w, h);
   J.imgproc.grayscale(id.data, w, h, gray);
+  if (EQ.on) stretch(gray);   // lighting / exposure tolerance across phones
   J.imgproc.gaussian_blur(gray, blur, 5, 0);
   J.yape06.laplacian_threshold = 14;
   J.yape06.min_eigen_value_threshold = 12;
@@ -59,9 +72,10 @@ export function refFeatures(src) {
   const [sw, sh] = srcSize(src); if (!sw) return null;
   const W0 = PW, H0 = Math.round(PW * sh / sw);
   const parts = [];
-  for (const s of [1.33, 1, 0.75]) {
+  // 4 scales: tolerates standing closer/further and different phone camera fields of view.
+  for (const [s, share] of [[1.33, 0.22], [1, 0.4], [0.75, 0.22], [0.56, 0.16]]) {
     const w = Math.round(W0 * s), h = Math.round(H0 * s);
-    parts.push(featuresFromImageData(draw(src, w, h), w, h, Math.round(MAX_REF * (s === 1 ? 0.5 : 0.25)), 1 / s));
+    parts.push(featuresFromImageData(draw(src, w, h), w, h, Math.round(MAX_REF * share), 1 / s));
   }
   const n = parts.reduce((a, p) => a + p.n, 0);
   const kp = new Float32Array(n * 2), desc = new Uint8Array(n * 32);
@@ -97,8 +111,22 @@ export function match(live, ref) {
   const kernel = new J.motion_model.homography2d();
   const model = new J.matrix_t(3, 3, J.F32_t | J.C1_t);
   const mask = new J.matrix_t(cnt, 1, J.U8_t | J.C1_t);
-  const params = new J.ransac_params_t(4, 4, 0.5, 0.99);
-  const ok = J.motion_estimator.ransac(params, kernel, from, to, cnt, model, mask, 600);
+  const params = new J.ransac_params_t(4, 4, 0.5, 0.995);
+  const ok = J.motion_estimator.ransac(params, kernel, from, to, cnt, model, mask, 1000);
   let inl = 0; if (ok) for (let i = 0; i < cnt; i++) inl += mask.data[i];
   return { inliers: inl, matches: cnt };
+}
+
+// Compact, JSON-safe fingerprint for shared site packages: keypoints as Uint16 (1/64 px), descriptors raw, both base64.
+const toB64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+const fromB64 = b => { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
+export function encodeFP(fp) {
+  const q = new Uint16Array(fp.n * 2);
+  for (let i = 0; i < fp.n * 2; i++) q[i] = Math.max(0, Math.min(65535, Math.round(fp.kp[i] * 64)));
+  return { w: fp.w, h: fp.h, n: fp.n, kp: toB64(new Uint8Array(q.buffer)), d: toB64(new Uint8Array(fp.desc.buffer, fp.desc.byteOffset, fp.n * 32)) };
+}
+export function decodeFP(e) {
+  const q = new Uint16Array(fromB64(e.kp).buffer), kp = new Float32Array(e.n * 2);
+  for (let i = 0; i < e.n * 2; i++) kp[i] = q[i] / 64;
+  return { w: e.w, h: e.h, n: e.n, kp, desc: fromB64(e.d) };
 }

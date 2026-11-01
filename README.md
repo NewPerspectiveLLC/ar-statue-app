@@ -25,3 +25,21 @@ The GPS zone (localStorage `ar-statue-zone`), rooms, photos, fingerprints and an
 - `build.py` (Blender 4.5) → `statue.glb`, `statue.usdz` (Y-up, meters, origin at base center). Texture from `tex.py`.
 - `src/xr.js` → `xr.bundle.js`: `npx esbuild src/xr.js --bundle --format=esm --minify --outfile=xr.bundle.js` (three r187).
 - `src/vision.js`: ORB via jsfeat (`vendor/jsfeat-min.js`). `?debug=ios` / `?debug=android` lets a desktop browser walk the camera flow.
+
+## Shared sites (program a location once, visitors get it ready-made)
+
+**Creator (Matt):** Settings ⚙︎ › *Create shared site* (or open `…/ar-statue-app/?admin=1`).
+1. Name the site, tap **Capture site here**: GPS zone (pick radius) → 4 room views (left, centre, right, doorway) → the statue corner (2 photos from slightly different spots).
+   Or tap **Use my current setup instead** to turn the personal setup on this phone into a site.
+2. Enter the admin passphrase → **Publish site**. You get the share link: `https://newperspectivellc.github.io/ar-statue-app/?site=<id>`.
+   Re-capturing later can update the same link.
+3. **Export package (.json)** is the offline fallback: send the file, and it gets committed to `sites/<id>.json`.
+
+**Visitor:** opens `?site=<id>`. No setup: GPS gate → *Potential statue placement activated* → Scan Room → corner guide → Place → audio.
+Visitors can't edit the site; their phone stores only its own AR anchor for that site.
+
+**Server:** `server/` = the Vercel function deployed as `ar-statue-sites.vercel.app/api/sites` (GET is public; POST needs the
+`x-admin-passphrase` header to match the server-side `ADMIN_PASSPHRASE` env var). Packages are stored in Vercel Blob. No secrets are in this repo.
+
+**Public in a published package:** site name, GPS zone centre + radius, ORB fingerprints of the room views and corner,
+and small thumbnails (160 px room views, 360 px corner photo). Nothing else.

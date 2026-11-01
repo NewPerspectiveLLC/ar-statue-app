@@ -50,3 +50,7 @@ header{position:relative}
 .lbl{display:block;font-size:13px;opacity:.85;margin-bottom:8px}
 .lbl input{margin:4px 0 0}
 #gpsStep .panel,#settings .panel{flex:1}
+.chk{display:flex;align-items:center;gap:8px;font-size:14px;opacity:.85;margin:0 0 12px}
+.chk input{width:auto;margin:0}
+#admin .panel{flex:1}
+#adLink{word-break:break-all}
