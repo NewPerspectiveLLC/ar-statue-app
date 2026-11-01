@@ -15,22 +15,62 @@
 
 <!-- HOME -->
 <section id="home" class="screen active">
-  <header><h1>AR STATUE APP</h1><p class="sub">Life-size stone statue · 1.8 m tall</p></header>
+  <header><button id="gear" class="gear" aria-label="Settings">⚙︎</button><h1>AR STATUE APP</h1><p class="sub">Life-size stone statue · 1.8 m tall</p></header>
   <model-viewer id="mv" src="statue.glb" ios-src="statue.usdz" alt="Life-size stone statue on a plinth"
     camera-controls touch-action="pan-y" camera-orbit="30deg 75deg 4.2m" shadow-intensity="1" shadow-softness="0.8"
     exposure="1.05" environment-image="neutral"></model-viewer>
   <div class="panel">
+    <div id="zoneCard" class="card">
+      <h3 id="zoneTitle">Checking location…</h3>
+      <p id="zoneText"></p>
+      <button id="scanBtn" class="big" hidden>Scan Room</button>
+      <button id="setupBtn" class="big" hidden>Start setup</button>
+    </div>
     <ol class="gates">
-      <li id="g1"><span class="dot"></span><b>Gate 1 · Device</b><small id="g1t">AR + camera check</small></li>
-      <li id="g2"><span class="dot"></span><b>Gate 2 · Room</b><small id="g2t">Recognize this room</small></li>
+      <li id="g1"><span class="dot"></span><b>Gate 1 · GPS zone</b><small id="g1t">Waiting for location</small></li>
+      <li id="g2"><span class="dot"></span><b>Gate 2 · Room match</b><small id="g2t">Scan when inside the zone</small></li>
       <li id="g3"><span class="dot"></span><b>Statue corner</b><small id="g3t">Not marked yet</small></li>
     </ol>
-    <button id="startBtn" class="big">Start</button>
-    <div class="row">
-      <button id="remarkBtn" class="ghost" hidden>Re-mark corner</button>
-      <button id="forgetBtn" class="ghost small" hidden>Forget saved rooms</button>
-    </div>
     <p class="msg" id="homeMsg"></p>
+  </div>
+</section>
+
+<!-- SETUP: GPS zone capture -->
+<section id="gpsStep" class="screen">
+  <header><h1>STATUE ZONE</h1><p class="sub" id="gpsStepSub">Setup step 1 of 3</p></header>
+  <div class="panel">
+    <h2>Capture your location</h2>
+    <p class="hint">Stand in the room where the statue will go (your hotel room). This spot becomes the centre of the statue zone. It's saved on this phone only.</p>
+    <div class="readout" id="gpsReadout">Waiting for GPS…</div>
+    <label class="lbl">Zone radius (m)<input id="gpsRadius" type="number" min="10" max="2000" value="75"></label>
+    <button id="gpsUse" class="big" disabled>Use This Location</button>
+    <div class="row"><button id="gpsBack" class="ghost">Cancel</button></div>
+  </div>
+</section>
+
+<!-- SETTINGS -->
+<section id="settings" class="screen">
+  <header><h1>SETTINGS</h1><p class="sub">Saved on this phone only</p></header>
+  <div class="panel">
+    <h2>Statue zone</h2>
+    <div class="readout" id="setReadout"></div>
+    <label class="lbl">Latitude<input id="setLat" type="number" step="any"></label>
+    <label class="lbl">Longitude<input id="setLon" type="number" step="any"></label>
+    <label class="lbl">Radius (m)<input id="setRad" type="number" min="10" max="5000"></label>
+    <div class="row">
+      <button id="setSave" class="ghost">Save zone</button>
+      <button id="setHere" class="ghost">Use current location</button>
+      <button id="setReset" class="ghost">Reset zone</button>
+    </div>
+    <h2 style="margin-top:18px">Room &amp; corner</h2>
+    <p class="hint" id="setRooms"></p>
+    <div class="row">
+      <button id="setRemark" class="ghost">Re-mark corner</button>
+      <button id="setRoomSetup" class="ghost">Re-capture room views</button>
+      <button id="setManual" class="ghost small">Skip room match (setup/debug)</button>
+      <button id="setForget" class="ghost small">Forget everything</button>
+    </div>
+    <div class="row"><button id="setBack" class="big" style="margin-top:12px">Done</button></div>
   </div>
 </section>
 

@@ -1,3 +1,4 @@
+[hidden]{display:none!important}
 :root{--bg:#14161a;--fg:#f2efe8;--accent:#d9b56b;--ok:#6fcf8a;--bad:#e26d5a}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
@@ -36,3 +37,16 @@ input{width:100%;padding:12px;border-radius:12px;border:1px solid #444a55;backgr
 .xrbtns{padding:0 20px 28px;display:grid;gap:10px;pointer-events:auto}
 .xrbtns .ghost{background:rgba(0,0,0,.45)}
 .floating{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 20px);z-index:9;padding:14px 22px;border-radius:30px;border:0;background:var(--accent);color:#1a1508;font-weight:700;font-size:17px}
+header{position:relative}
+.gear{position:absolute;right:14px;top:calc(env(safe-area-inset-top) + 12px);background:transparent;border:1px solid #444a55;color:var(--fg);border-radius:10px;font-size:20px;width:40px;height:40px}
+.card{background:#1d2026;border-radius:16px;padding:14px 16px;margin-bottom:12px;border:1px solid #2c3038}
+.card h3{margin:0 0 4px;font-size:18px}
+.card p{margin:0 0 10px;font-size:14.5px;opacity:.8;line-height:1.4}
+.card.active{background:linear-gradient(160deg,#3a2f17,#1d2026 70%);border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 10px 30px rgba(217,181,107,.18)}
+.card.active h3{color:var(--accent);font-size:21px}
+.card.calm h3{color:#b9c0cc;font-weight:600}
+.card.warn h3{color:var(--bad)}
+.readout{font:13px/1.5 ui-monospace,Menlo,monospace;background:#1d2026;border-radius:10px;padding:10px 12px;margin:8px 0 12px;white-space:pre-wrap}
+.lbl{display:block;font-size:13px;opacity:.85;margin-bottom:8px}
+.lbl input{margin:4px 0 0}
+#gpsStep .panel,#settings .panel{flex:1}
