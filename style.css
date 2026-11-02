@@ -57,3 +57,8 @@ header{position:relative}
 .picker{display:inline-flex;gap:4px;margin:10px auto 2px;padding:4px;background:#1d2026;border:1px solid #2c3038;border-radius:14px}
 .picker button{border:0;background:transparent;color:var(--fg);padding:8px 16px;border-radius:10px;font-size:15px;opacity:.7}
 .picker button.on{background:var(--accent);color:#1a1508;font-weight:700;opacity:1}
+.big.summon{background:linear-gradient(160deg,#eef3ff,#b9c6e6);color:#141824;box-shadow:0 8px 28px rgba(185,198,230,.35);margin-bottom:4px}
+.big.summon.xl{padding:26px;font-size:28px;border-radius:22px}
+.center{text-align:center}
+.summonwrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:34dvh;background:radial-gradient(ellipse at 50% 45%,#2a2e36 0%,#14161a 70%)}
+.summonart{height:min(40dvh,320px);width:auto}

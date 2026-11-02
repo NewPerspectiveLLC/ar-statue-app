@@ -99,7 +99,7 @@ export async function start(opts) {
     }
   } else {
     ui.showPlace(true);
-    ui.status(mode === 'mark' ? 'Move the phone slowly. Put the ring on the floor in your corner, then tap Mark Corner.'
+    ui.status(opts.statusText ? opts.statusText : mode === 'mark' ? 'Move the phone slowly. Put the ring on the floor in your corner, then tap Mark Corner.'
                               : 'Put the ring on the floor in your corner, then tap Place Statue Here.');
   }
 

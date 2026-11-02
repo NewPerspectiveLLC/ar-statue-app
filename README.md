@@ -51,3 +51,9 @@ Visitors can't edit the site; their phone stores only its own AR anchor for that
 
 **Public in a published package:** site name, GPS zone centre + radius, ORB fingerprints of the room views and corner,
 and small thumbnails (160 px room views, 360 px corner photo). Nothing else.
+
+## Summon Ghost (anywhere, anytime)
+
+`https://newperspectivellc.github.io/ar-statue-app/?summon=ghost` (also `?model=ghost&anywhere=1`) opens a one-button page. Tap **👻 Summon** to go straight into AR: AR Quick Look with `ghost.usdz` on iPhone, WebXR on ARCore Android phones (Scene Viewer if WebXR isn't available). It uses floor placement only, with no GPS zone, room scan, or corner, and the ghost sound plays. The home screen also has an always-visible **👻 Summon Ghost** button. The gated statue/ghost flows for shared sites are unchanged.
+
+To add it to the Home Screen on iPhone, open the link in Safari, then Share › Add to Home Screen. The icon is `icons/ghost-180.png` and the name is "Summon Ghost". `summon.webmanifest` uses `display: browser` so the icon opens in Safari, where Quick Look works.

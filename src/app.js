@@ -11,6 +11,9 @@ const MODELS = {
 };
 let MODEL = MODELS[(Q.get('model') || '').toLowerCase()] ? Q.get('model').toLowerCase() : 'statue';
 const M = () => MODELS[MODEL];
+// Ungated summon: ?summon=ghost (or ?model=ghost&anywhere=1) = one big button, straight to AR anywhere. No zone, no room scan, no corner.
+const SUMMON = (Q.get('summon') || '').toLowerCase() === 'ghost' || (Q.get('model') === 'ghost' && Q.get('anywhere') === '1');
+if (SUMMON) MODEL = 'ghost';
 const DEBUG = Q.has('debug');               // desktop testing: pretend AR exists (?debug=ios | ?debug=android)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 // Shared sites: ?site=<id> = visitor (read-only copy of a published site); ?admin=1 = creator mode.
@@ -549,8 +552,53 @@ function setModel(m) {
 document.querySelectorAll('#picker button').forEach(b => b.onclick = () => setModel(b.dataset.model));
 setModel(MODEL);
 
+/* ---------------- summon ghost anywhere (ungated) ---------------- */
+const isAndroid = /Android/i.test(navigator.userAgent);
+// separate player so summoning never changes the statue/ghost placement audio of the gated flow
+const ghostAudio = new Audio('audio/ghost' + (isIOS ? '.m4a' : '.mp3')); ghostAudio.preload = 'auto';
+let ghostPending = false;
+function playGhost(offset) { ghostAudio.pause(); ghostAudio.currentTime = offset; ghostAudio.muted = false; ghostPending = true; ghostAudio.play().catch(() => {}); }
+ghostAudio.addEventListener('ended', () => { ghostPending = false; });
+const resumeGhost = () => { if (document.visibilityState === 'visible' && ghostPending && ghostAudio.paused && !ghostAudio.ended) ghostAudio.play().catch(() => {}); };
+document.addEventListener('visibilitychange', resumeGhost); window.addEventListener('pageshow', resumeGhost); window.addEventListener('focus', resumeGhost);
+function summonMsg(t) { $('summonMsg').textContent = t; $('homeMsg').textContent = t; }
+function summonGhost() {
+  const g = MODELS.ghost; summonMsg('');
+  if (isIOS || (DEBUG && Q.get('debug') !== 'android')) {   // must stay synchronous inside the tap for Quick Look
+    playGhost(0);
+    const a = document.createElement('a'); a.rel = 'ar';
+    a.href = new URL(g.usdz + '#allowsContentScaling=0', location.href).href;
+    a.appendChild(document.createElement('img')); document.body.appendChild(a); a.click(); a.remove();
+    window.__lastAR = a.href;
+    summonMsg('Point at the floor and move the phone slowly. The ghost appears after a moment and flies in.');
+    return;
+  }
+  ghostAudio.muted = true; ghostAudio.play().then(() => { ghostAudio.pause(); ghostAudio.muted = false; }).catch(() => { ghostAudio.muted = false; });
+  (async () => {
+    await checkDevice();
+    if (platform === 'android' && xr) {
+      const ov = $('xr-overlay'); ov.hidden = false; $('xrPlace').textContent = 'Summon Ghost Here';
+      const ui = { status: t => $('xrStatus').textContent = t, showPlace: b => $('xrPlace').hidden = !b,
+                   onPlace: fn => $('xrPlace').onclick = fn, onExit: fn => $('xrExit').onclick = fn };
+      try {
+        await xr.start({ mode: 'free', model: g.glb, anim: g.anim, overlay: ov, ui,
+          statusText: 'Point at the floor, move slowly, then tap Summon Ghost Here.',
+          onAnchored: info => { if (info.isNew) playGhost(g.audioOffsetAndroid || 0); },
+          onEnd: () => { ov.hidden = true; } });
+      } catch (e) { ov.hidden = true; summonMsg('Could not start AR: ' + e.message); }
+    } else if (isAndroid) {   // no WebXR: hand off to Google Scene Viewer
+      const file = new URL(g.glb, location.href).href;
+      location.href = 'intent://arvr.google.com/scene-viewer/1.2?file=' + encodeURIComponent(file) + '&mode=ar_only&title=Ghost#Intent;scheme=https;package=com.google.ar.core;action=android.intent.action.VIEW;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end;';
+    } else summonMsg('Open this on an iPhone (Safari) or an ARCore Android phone (Chrome) to summon the ghost.');
+  })();
+}
+$('summonBtn').onclick = summonGhost;
+$('summonHome').onclick = summonGhost;
+$('summonFull').onclick = () => { const u = new URL(location.href); u.search = ''; location.href = u.href; };
+
 /* ---------------- boot ---------------- */
 (async () => {
+  if (SUMMON) { show('summon'); checkDevice(); return; }   // no GPS prompt, no rooms, no gates
   if (VISITOR) {
     $('gear').hidden = false; renderHome();
     site = await loadSite(); siteErr = !site;
@@ -562,4 +610,4 @@ setModel(MODEL);
   renderHome();
   if (ADMIN) show('admin');
 })();
-window.__statue = { get model() { return MODEL; }, setModel, db, match, liveFeatures, refFeatures, zoneState, draft, get site() { return site; }, get rooms() { return rooms; }, get placement() { return placement; }, get geo() { return geo; } };
+window.__statue = { SUMMON, summonGhost, get model() { return MODEL; }, setModel, db, match, liveFeatures, refFeatures, zoneState, draft, get site() { return site; }, get rooms() { return rooms; }, get placement() { return placement; }, get geo() { return geo; } };

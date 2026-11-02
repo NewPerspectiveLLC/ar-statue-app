@@ -7,6 +7,22 @@
 <meta name="theme-color" content="#14161a">
 <link rel="icon" href="data:,">
 <title>AR Statue App</title>
+<script>
+// Summon page (?summon=ghost or ?model=ghost&anywhere=1): Home Screen icon + name "Summon Ghost".
+// Opens in Safari (not standalone) so AR Quick Look works from the icon.
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (!((q.get('summon') || '').toLowerCase() === 'ghost' || (q.get('model') === 'ghost' && q.get('anywhere') === '1'))) return;
+  document.title = 'Summon Ghost';
+  var cap = document.querySelector('meta[name="apple-mobile-web-app-capable"]'); if (cap) cap.remove();
+  var add = function (tag, attrs) { var e = document.createElement(tag); for (var k in attrs) e.setAttribute(k, attrs[k]); document.head.appendChild(e); };
+  add('link', { rel: 'apple-touch-icon', href: 'icons/ghost-180.png' });
+  add('link', { rel: 'icon', type: 'image/png', href: 'icons/ghost-192.png' });
+  add('link', { rel: 'manifest', href: 'summon.webmanifest' });
+  add('meta', { name: 'apple-mobile-web-app-title', content: 'Summon Ghost' });
+  add('meta', { name: 'application-name', content: 'Summon Ghost' });
+})();
+</script>
 <script src="vendor/jsfeat-min.js"></script>
 <script type="module" src="vendor/model-viewer.min.js"></script>
 <link rel="stylesheet" href="style.css">
@@ -21,6 +37,8 @@
     camera-controls touch-action="pan-y" camera-orbit="30deg 75deg 4.2m" shadow-intensity="1" shadow-softness="0.8"
     exposure="1.05" environment-image="neutral" animation-crossfade-duration="0"></model-viewer>
   <div class="panel">
+    <button id="summonHome" class="big summon">👻 Summon Ghost</button>
+    <p class="hint center">Anywhere, anytime: straight to AR, no zone or room check.</p>
     <div id="zoneCard" class="card">
       <h3 id="zoneTitle">Checking location…</h3>
       <p id="zoneText"></p>
@@ -33,6 +51,18 @@
       <li id="g3"><span class="dot"></span><b>Statue corner</b><small id="g3t">Not marked yet</small></li>
     </ol>
     <p class="msg" id="homeMsg"></p>
+  </div>
+</section>
+
+<!-- SUMMON: ungated ghost, one button -->
+<section id="summon" class="screen">
+  <header><h1>SUMMON GHOST</h1><p class="sub">Anywhere, anytime</p></header>
+  <div class="summonwrap"><img src="icons/ghost-art.png" alt="" class="summonart"></div>
+  <div class="panel">
+    <button id="summonBtn" class="big summon xl">👻 Summon</button>
+    <p class="hint center" id="summonMsg">Tap, point at the floor, and the ghost flies in and hovers there.</p>
+    <p class="hint center small">Tip: Share › Add to Home Screen to keep a Summon Ghost icon.</p>
+    <div class="row"><button id="summonFull" class="ghost small">Open the full AR Statue App</button></div>
   </div>
 </section>
 
