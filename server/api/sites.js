@@ -1,8 +1,10 @@
 // AR Statue App — shared site packages.
 // GET  /api/sites?id=<id>   -> public site package JSON (anyone)
-// POST /api/sites           -> publish/update a package (needs x-admin-passphrase == env ADMIN_PASSPHRASE)
-import { put, head } from '@vercel/blob';
-import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
+// POST /api/sites           -> publish/update a package (needs x-admin-passphrase matching env ADMIN_PASSPHRASE_SCRYPT)
+// POST /api/sites?check=1   -> passphrase check only, writes nothing
+// DELETE /api/sites?id=<id> -> unpublish a site (needs passphrase)
+import { put, head, del } from '@vercel/blob';
+import { timingSafeEqual, createHash, randomBytes, scryptSync } from 'node:crypto';
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{2,39}$/;
 const MAX_BYTES = 900_000;
@@ -12,15 +14,20 @@ function cors(req, res) {
   const o = req.headers.origin;
   res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0]);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'content-type,x-admin-passphrase');
   res.setHeader('Access-Control-Max-Age', '600');
 }
 const sha = s => createHash('sha256').update(String(s)).digest();
+// ADMIN_PASSPHRASE_SCRYPT = "scrypt$N$r$p$<salt b64>$<hash b64>" (only a salted hash is stored server-side)
 function passOK(given) {
-  const real = process.env.ADMIN_PASSPHRASE;
-  if (!real || real.length < 8 || !given) return false;
-  return timingSafeEqual(sha(given), sha(real));
+  const rec = process.env.ADMIN_PASSPHRASE_SCRYPT;
+  if (!rec || !given) return false;
+  const [k, N, r, p, salt, hash] = rec.split('$');
+  if (k !== 'scrypt') return false;
+  const want = Buffer.from(hash, 'base64');
+  const got = scryptSync(String(given), Buffer.from(salt, 'base64'), want.length, { N: +N, r: +r, p: +p, maxmem: 64 * 1024 * 1024 });
+  return timingSafeEqual(got, want);
 }
 const num = (v, lo, hi) => typeof v === 'number' && isFinite(v) && v >= lo && v <= hi;
 const b64 = (s, max) => typeof s === 'string' && s.length <= max && /^[A-Za-z0-9+/=]*$/.test(s);
@@ -55,9 +62,16 @@ export default async function handler(req, res) {
     } catch { return res.status(404).json({ error: 'not found' }); }
   }
 
-  if (req.method === 'POST') {
-    if (!process.env.ADMIN_PASSPHRASE) return res.status(503).json({ error: 'publishing not configured' });
+  if (req.method === 'POST' || req.method === 'DELETE') {
+    if (!process.env.ADMIN_PASSPHRASE_SCRYPT) return res.status(503).json({ error: 'publishing not configured' });
     if (!passOK(req.headers['x-admin-passphrase'])) { await new Promise(r => setTimeout(r, 1200)); return res.status(401).json({ error: 'wrong passphrase' }); }
+    if (req.method === 'POST' && req.query.check) return res.status(200).json({ ok: true });
+    if (req.method === 'DELETE') {
+      const id = String(req.query.id || '');
+      if (!ID_RE.test(id)) return res.status(400).json({ error: 'bad id' });
+      try { const meta = await head(`sites/${id}.json`); await del(meta.url); return res.status(200).json({ deleted: id }); }
+      catch { return res.status(404).json({ error: 'not found' }); }
+    }
     const len = Number(req.headers['content-length'] || 0);
     if (len > MAX_BYTES) return res.status(413).json({ error: 'package too large' });
     const p = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -71,6 +85,6 @@ export default async function handler(req, res) {
     await put(`sites/${id}.json`, json, { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json', cacheControlMaxAge: 60 });
     return res.status(200).json({ id, bytes: json.length, share: `https://newperspectivellc.github.io/ar-statue-app/?site=${id}` });
   }
-  res.setHeader('Allow', 'GET,POST,OPTIONS');
+  res.setHeader('Allow', 'GET,POST,DELETE,OPTIONS');
   return res.status(405).json({ error: 'method not allowed' });
 }

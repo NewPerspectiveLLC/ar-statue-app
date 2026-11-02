@@ -39,7 +39,7 @@ The GPS zone (localStorage `ar-statue-zone`), rooms, photos, fingerprints and an
 Visitors can't edit the site; their phone stores only its own AR anchor for that site.
 
 **Server:** `server/` = the Vercel function deployed as `ar-statue-sites.vercel.app/api/sites` (GET is public; POST needs the
-`x-admin-passphrase` header to match the server-side `ADMIN_PASSPHRASE` env var). Packages are stored in Vercel Blob. No secrets are in this repo.
+`x-admin-passphrase` header to match; the server stores only a salted scrypt hash in the `ADMIN_PASSPHRASE_SCRYPT` env var). `POST ?check=1` verifies a passphrase without publishing; `DELETE ?id=` unpublishes a site. Packages are stored in Vercel Blob. No secrets are in this repo.
 
 **Public in a published package:** site name, GPS zone centre + radius, ORB fingerprints of the room views and corner,
 and small thumbnails (160 px room views, 360 px corner photo). Nothing else.
