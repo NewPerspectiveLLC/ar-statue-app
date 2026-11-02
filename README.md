@@ -21,6 +21,14 @@ Puts a life-size stone statue (0.72 m plinth, 0.5 × 0.5 m block, 1.8 m tall) in
 
 The GPS zone (localStorage `ar-statue-zone`), rooms, photos, fingerprints and anchor handles are stored **only on the phone** (IndexedDB `ar-statue-app`). Nothing is uploaded.
 
+## Ghost (model picker: Statue / Ghost, or `?model=ghost`)
+A human-sized sheet ghost (≈1.5 m of cloth, hovering ~0.4 m off the floor, hollow dark eyes, translucent glowing sheet, wispy tail) that **flies in and then stays locked** to the room. Same gates, corner flow and placement as the statue; the ghost's hover point is the placement spot. Statue stays the default.
+- Baked skeletal animation (UsdSkel / glTF skin), relative to the placement origin: appears ~7 m away and ~2.5 m up on the far side, swoops in on a curved path (~4 s, banking, cloth/hem/tail wiggle), decelerates, settles hovering, then a seamless idle bob (±10 cm, gentle sway).
+- `ghost.usdz` (iOS Quick Look): Quick Look loops the whole timeline, so the file is 2.5 s hidden (lets ARKit find the floor) → materialise → swoop → ~2 min of idle → vanish → loops. Floor shadow disc keeps the bounding-box bottom on the floor so the hover gap survives placement.
+- `ghost.glb` (WebXR / model-viewer): 0–8.5 s intro (materialise, swoop, first bob) played once, then 8.5–12.5 s looped forever (`src/xr.js` AnimationMixer subclips).
+- Sound: `audio/ghost.mp3|m4a` (synthesised whoosh + wail, no samples) plays once per ghost placement instead of the statue line.
+- Build: `blender -b --python ghost/build_ghost.py -- usd glb` → `ghost.glb`, `ghost.usdz` (+ `ghost/ghost.blend`, not committed). Check: `blender -b --python ghost/inspect_usdz.py -- ghost.usdz` (ARKit compliance + timeSamples). Audio: `python3 ghost/make_audio.py`.
+
 ## Build
 - `build.py` (Blender 4.5) → `statue.glb`, `statue.usdz` (Y-up, meters, origin at base center). Texture from `tex.py`.
 - `src/xr.js` → `xr.bundle.js`: `npx esbuild src/xr.js --bundle --format=esm --minify --outfile=xr.bundle.js` (three r187).

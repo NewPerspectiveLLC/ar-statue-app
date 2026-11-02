@@ -2,10 +2,18 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-let proto = null;
-async function loadStatue() {
-  if (!proto) proto = (await new GLTFLoader().loadAsync('statue.glb')).scene;
-  return proto.clone(true);
+import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
+const protos = {};
+async function loadModel(url) { // statue.glb (static) or ghost.glb (skinned + baked fly-in/idle animation)
+  if (!protos[url]) protos[url] = new GLTFLoader().loadAsync(url);
+  const g = await protos[url];
+  const root = skeletonClone(g.scene);
+  root.traverse(o => {
+    if (!o.isSkinnedMesh) return;
+    o.frustumCulled = false;                                                   // it flies far outside its bind-pose bounds
+    if (o.material && o.material.name === 'GhostSheet') o.material.depthWrite = true; // hide the tail root behind the translucent sheet
+  });
+  return { root, clips: g.animations };
 }
 function yawOf(m4) { // heading of +Z axis of a pose matrix (array, column-major)
   return Math.atan2(m4[8], m4[10]);
@@ -50,8 +58,22 @@ export async function start(opts) {
   reticle.add(new THREE.Mesh(new THREE.RingGeometry(0.16, 0.2, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xd9b56b })));
   reticle.add(new THREE.Mesh(new THREE.CircleGeometry(0.025, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff })));
   reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
-  const statue = await loadStatue(); statue.add(shadowBlob());
+  const model = await loadModel(opts.model || 'statue.glb'), statue = model.root;
+  if (!opts.anim) statue.add(shadowBlob());            // the ghost carries its own animated floor shadow
   statue.matrixAutoUpdate = false; statue.visible = false; scene.add(statue);
+  // Animated model: intro (materialise + swoop in + first bob) once, then a seamless idle loop forever.
+  let mixer = null, intro = null, idle = null, animStarted = false;
+  const clock = new THREE.Clock();
+  if (opts.anim && model.clips.length) {
+    const A = opts.anim, clip = model.clips[0];
+    mixer = new THREE.AnimationMixer(statue);
+    intro = mixer.clipAction(THREE.AnimationUtils.subclip(clip, 'intro', A.intro[0], A.intro[1] + 1, A.fps));
+    idle = mixer.clipAction(THREE.AnimationUtils.subclip(clip, 'idle', A.loop[0], A.loop[1], A.fps));
+    intro.setLoop(THREE.LoopOnce, 1); intro.clampWhenFinished = true; idle.setLoop(THREE.LoopRepeat, Infinity);
+    mixer.addEventListener('finished', e => { if (e.action === intro) { idle.reset().play(); intro.stop(); } });
+    mixer.update(0);
+  }
+  const startAnim = () => { if (mixer && !animStarted) { animStarted = true; intro.reset().play(); clock.getDelta(); } };
 
   const ref = renderer.xr.getReferenceSpace();
   const viewer = await session.requestReferenceSpace('viewer');
@@ -109,10 +131,11 @@ export async function start(opts) {
         const m = ap.transform.matrix, aYaw = yawOf(m);
         if (anchor._yawWorld !== undefined && opts._yawRelSet !== true) { yawRel = anchor._yawWorld - aYaw; opts._yawRelSet = true; opts.onYawRel && opts.onYawRel(yawRel); }
         P.set(m[12], m[13], m[14]); Q.setFromAxisAngle(Y, aYaw + yawRel);
-        statue.matrix.compose(P, Q, S); statue.visible = true;
+        statue.matrix.compose(P, Q, S); statue.visible = true; startAnim();
         if (lost) { lost = false; ui.status('Statue locked to the floor. Walk around it.'); }
       } else if (!lost) { lost = true; ui.status('Tracking lost. Point back at the corner and move slowly.'); }
     }
+    if (mixer && animStarted) mixer.update(Math.min(clock.getDelta(), 0.1));
     renderer.render(scene, camera);
   });
 

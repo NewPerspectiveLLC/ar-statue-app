@@ -2,6 +2,15 @@ import { liveFeatures, refFeatures, thumbnail, match, encodeFP, decodeFP } from 
 
 const $ = id => document.getElementById(id);
 const Q = new URLSearchParams(location.search);
+// Models: ?model=ghost picks the flying ghost; the statue stays the default.
+const MODELS = {
+  statue: { glb: 'statue.glb', usdz: 'statue.usdz', noun: 'Statue', sub: 'Life-size stone statue · 1.8 m tall', alt: 'Life-size stone statue on a plinth', orbit: '30deg 75deg 4.2m', audio: 'activate', anim: null },
+  // ghost.glb timeline (24 fps): 0–4.5 s materialise + swoop in, 4.5–8.5 s first idle bob (ramps in), 8.5–12.5 s seamless idle loop
+  ghost: { glb: 'ghost.glb', usdz: 'ghost.usdz', noun: 'Ghost', sub: 'Flying ghost · swoops in, then hovers', alt: 'Glowing white sheet ghost that flies in and hovers', orbit: '15deg 82deg 5.2m', audio: 'ghost',
+           anim: { fps: 24, intro: [0, 204], loop: [204, 301] }, audioOffsetAndroid: 2.5 },
+};
+let MODEL = MODELS[(Q.get('model') || '').toLowerCase()] ? Q.get('model').toLowerCase() : 'statue';
+const M = () => MODELS[MODEL];
 const DEBUG = Q.has('debug');               // desktop testing: pretend AR exists (?debug=ios | ?debug=android)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 // Shared sites: ?site=<id> = visitor (read-only copy of a published site); ?admin=1 = creator mode.
@@ -75,7 +84,7 @@ async function buildPackage({ name, zone: z, views, corner, id, created }) {
 const DKEY = 'ar-statue-site-draft', PKEY = 'ar-statue-admin-pass';
 const draft = { get() { try { return JSON.parse(localStorage.getItem(DKEY)); } catch { return null; } },
                 set(p) { localStorage.setItem(DKEY, JSON.stringify(p)); }, clear() { localStorage.removeItem(DKEY); } };
-const shareURL = id => new URL('?site=' + id, location.origin + location.pathname).href;
+const shareURL = id => new URL('?site=' + id + (MODEL !== 'statue' ? '&model=' + MODEL : ''), location.origin + location.pathname).href;
 
 /* ---------------- GPS geofence (Gate 1) ---------------- */
 const geo = { fix: null, err: null, id: null };
@@ -105,7 +114,8 @@ let geoListeners = [];
 function onGeo() { renderHome(); geoListeners.forEach(f => f()); }
 
 /* ---------------- activation audio (once per placement) ---------------- */
-const audio = new Audio(isIOS ? 'audio/activate.m4a' : 'audio/activate.mp3');
+const audioSrc = () => 'audio/' + M().audio + (isIOS ? '.m4a' : '.mp3');
+const audio = new Audio(audioSrc());
 audio.preload = 'auto';
 let placement = null; // {id, started, done}
 function newPlacement() { placement = { id: Date.now(), started: false, done: false }; }
@@ -117,7 +127,7 @@ function unlockAudio() { // call inside a user tap
 }
 function playActivation() {
   if (!placement || placement.done) return;
-  if (!placement.started) { audio.currentTime = 0; placement.started = true; }
+  if (!placement.started) { audio.currentTime = (platform === 'android' && M().audioOffsetAndroid) || 0; placement.started = true; }
   audio.muted = false;
   audio.play().catch(() => { $('playAgain').hidden = false; });
 }
@@ -338,11 +348,11 @@ async function markCorner(room, stepText) {
 function runXR(room, mode) {
   return new Promise(async resolve => {
     const ov = $('xr-overlay'); ov.hidden = false;
-    $('xrPlace').textContent = mode === 'mark' ? 'Mark Corner' : 'Place Statue Here';
+    $('xrPlace').textContent = mode === 'mark' ? 'Mark Corner' : `Place ${M().noun} Here`;
     const ui = { status: t => $('xrStatus').textContent = t, showPlace: b => $('xrPlace').hidden = !b,
                  onPlace: fn => $('xrPlace').onclick = fn, onExit: fn => $('xrExit').onclick = fn };
     try {
-      await xr.start({ mode, handle: room.corner && room.corner.handle, yawRel: room.corner && room.corner.fallback && room.corner.fallback.yawRel,
+      await xr.start({ mode, model: M().glb, anim: M().anim, handle: room.corner && room.corner.handle, yawRel: room.corner && room.corner.fallback && room.corner.fallback.yawRel,
         overlay: ov, ui,
         onAnchored: async info => {
           if (info.isNew) {
@@ -368,8 +378,8 @@ async function placeAtCorner(room) {
     cameraOff(); await runXR(room, 'restore'); return;
   }
   show('cam'); if (!(await needCamera())) return;
-  cam({ title: VISITOR ? 'Aim at the statue corner' : 'Aim at your saved corner', text: 'Match the photo in the corner of the screen. Place Statue Here unlocks when the view matches.',
-        meter: true, primary: 'Place Statue Here', primaryDisabled: true, thumb: room.corner.photo, alt: VISITOR ? null : 'Re-mark corner' });
+  cam({ title: VISITOR ? 'Aim at the statue corner' : 'Aim at your saved corner', text: `Match the photo in the corner of the screen. Place ${M().noun} Here unlocks when the view matches.`,
+        meter: true, primary: `Place ${M().noun} Here`, primaryDisabled: true, thumb: room.corner.photo, alt: VISITOR ? null : 'Re-mark corner' });
   let streak = 0;
   startLoop(() => {
     const live = liveFeatures($('video')); if (!live) return;
@@ -386,7 +396,8 @@ async function placeAtCorner(room) {
   if (platform === 'ios') {
     newPlacement(); playActivation();          // same tap: start the audio, then Quick Look
     cameraOff(); openQuickLook();
-    $('homeMsg').textContent = 'Quick Look: move the phone slowly, then set the statue on the floor in your corner.';
+    $('homeMsg').textContent = MODEL === 'ghost' ? 'Quick Look: move the phone slowly and set the ghost’s spot on the floor in your corner. It appears after a moment and flies in.'
+      : 'Quick Look: move the phone slowly, then set the statue on the floor in your corner.';
     show('home');
   } else {
     unlockAudio(); cameraOff(); await runXR(room, 'guided');
@@ -394,7 +405,7 @@ async function placeAtCorner(room) {
 }
 function openQuickLook() {
   const a = document.createElement('a'); a.rel = 'ar';
-  a.href = new URL('statue.usdz#allowsContentScaling=0', location.href).href;
+  a.href = new URL(M().usdz + '#allowsContentScaling=0', location.href).href;
   a.appendChild(document.createElement('img')); document.body.appendChild(a); a.click(); a.remove();
 }
 
@@ -521,12 +532,29 @@ $('adDownload').onclick = async () => {
 $('adDiscard').onclick = () => { if (confirm('Discard this draft on this phone? (A published site stays online.)')) { draft.clear(); $('adMsg').textContent = ''; renderAdmin(); } };
 $('adBack').onclick = () => show('home');
 
+/* ---------------- model picker (Statue / Ghost) ---------------- */
+function setModel(m) {
+  if (!MODELS[m]) m = 'statue';
+  MODEL = m; const d = M(), mv = $('mv');
+  if (mv.getAttribute('src') !== d.glb) { mv.setAttribute('src', d.glb); mv.setAttribute('ios-src', d.usdz); mv.setAttribute('alt', d.alt); mv.setAttribute('camera-orbit', d.orbit); }
+  if (d.anim) mv.setAttribute('autoplay', ''); else mv.removeAttribute('autoplay');
+  mv.setAttribute('shadow-intensity', d.anim ? '0' : '1');   // the ghost carries its own floor shadow
+  $('homeSub').textContent = (site ? 'Shared statue site · ' + site.name + ' · ' : '') + d.sub;
+  document.querySelectorAll('#picker button').forEach(b => { const on = b.dataset.model === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  $('xrPlace').textContent = `Place ${d.noun} Here`;
+  if (!(placement && placement.started && !placement.done)) { audio.src = audioSrc(); audio.load(); }
+  const u = new URL(location.href); if (m === 'statue') u.searchParams.delete('model'); else u.searchParams.set('model', m);
+  history.replaceState(null, '', u);
+}
+document.querySelectorAll('#picker button').forEach(b => b.onclick = () => setModel(b.dataset.model));
+setModel(MODEL);
+
 /* ---------------- boot ---------------- */
 (async () => {
   if (VISITOR) {
     $('gear').hidden = false; renderHome();
     site = await loadSite(); siteErr = !site;
-    if (site) $('homeSub').textContent = 'Shared statue site · ' + site.name;
+    if (site) setModel(MODEL);
   }
   await loadRooms();
   await checkDevice();
@@ -534,4 +562,4 @@ $('adBack').onclick = () => show('home');
   renderHome();
   if (ADMIN) show('admin');
 })();
-window.__statue = { db, match, liveFeatures, refFeatures, zoneState, draft, get site() { return site; }, get rooms() { return rooms; }, get placement() { return placement; }, get geo() { return geo; } };
+window.__statue = { get model() { return MODEL; }, setModel, db, match, liveFeatures, refFeatures, zoneState, draft, get site() { return site; }, get rooms() { return rooms; }, get placement() { return placement; }, get geo() { return geo; } };

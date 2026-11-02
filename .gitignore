@@ -1,3 +1,6 @@
 test-*.png
 preview-live.png
 _*.png
+ghost/ghost.blend
+ghost-frames.png
+ghost/*.blend1

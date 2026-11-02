@@ -15,10 +15,11 @@
 
 <!-- HOME -->
 <section id="home" class="screen active">
-  <header><button id="gear" class="gear" aria-label="Settings">⚙︎</button><h1>AR STATUE APP</h1><p class="sub" id="homeSub">Life-size stone statue · 1.8 m tall</p></header>
+  <header><button id="gear" class="gear" aria-label="Settings">⚙︎</button><h1>AR STATUE APP</h1><p class="sub" id="homeSub">Life-size stone statue · 1.8 m tall</p>
+    <div id="picker" class="picker" role="group" aria-label="Choose what to place"><button type="button" data-model="statue" class="on" aria-pressed="true">🗿 Statue</button><button type="button" data-model="ghost" aria-pressed="false">👻 Ghost</button></div></header>
   <model-viewer id="mv" src="statue.glb" ios-src="statue.usdz" alt="Life-size stone statue on a plinth"
     camera-controls touch-action="pan-y" camera-orbit="30deg 75deg 4.2m" shadow-intensity="1" shadow-softness="0.8"
-    exposure="1.05" environment-image="neutral"></model-viewer>
+    exposure="1.05" environment-image="neutral" animation-crossfade-duration="0"></model-viewer>
   <div class="panel">
     <div id="zoneCard" class="card">
       <h3 id="zoneTitle">Checking location…</h3>
